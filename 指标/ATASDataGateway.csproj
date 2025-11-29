@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net8.0-windows</TargetFramework>
+		<UseWPF>true</UseWPF>
+		<AssemblyName>NFQE_Bridge</AssemblyName>
+		<RootNamespace>ATAS.Indicators.Technical</RootNamespace>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+		<PackageReference Include="WebSocketSharp-netstandard" Version="1.0.1" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Reference Include="ATAS.DataFeedsCore">
+			<HintPath>..\..\Program Files (x86)\ATAS Platform\ATAS.DataFeedsCore.dll</HintPath>
+		</Reference>
+		<Reference Include="ATAS.Indicators">
+			<HintPath>..\..\Program Files (x86)\ATAS Platform\ATAS.Indicators.dll</HintPath>
+		</Reference>
+		<Reference Include="ATAS.Types">
+			<HintPath>..\..\Program Files (x86)\ATAS Platform\ATAS.Types.dll</HintPath>
+		</Reference>
+		<Reference Include="Utils.Common">
+			<HintPath>..\..\Program Files (x86)\ATAS Platform\Utils.Common.dll</HintPath>
+		</Reference>
+	</ItemGroup>
+
+</Project>

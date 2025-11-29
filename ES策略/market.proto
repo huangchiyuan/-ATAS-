@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package market;
+
+// L2 深度快照
+message DepthLevel {
+  double price     = 1;
+  int64  bid_qty   = 2;
+  int64  ask_qty   = 3;
+}
+
+message DepthSnapshot {
+  string symbol           = 1;
+  int64  timestamp        = 2;   // 毫秒时间戳
+  uint64 seq              = 3;   // 序列号，防丢包
+  double best_bid_price   = 4;
+  double best_ask_price   = 5;
+  int64  best_bid_qty     = 6;
+  int64  best_ask_qty     = 7;
+  repeated DepthLevel levels = 8; // Top N 档
+}
+
+// 逐笔成交
+message TradeTick {
+  string symbol     = 1;
+  int64  timestamp  = 2;
+  uint64 seq        = 3;
+  double price      = 4;
+  int64  volume     = 5;
+  bool   is_buy     = 6;   // true=买盘，false=卖盘
+}
+
+// 统一消息
+message MarketMessage {
+  oneof msg {
+    DepthSnapshot depth = 1;
+    TradeTick     trade = 2;
+  }
+}
