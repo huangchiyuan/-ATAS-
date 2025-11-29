@@ -1,0 +1,43 @@
+﻿# =============== 忽略所有 ===============
+*
+# =============== 但显式保留以下 ===============
+
+# 保留源代码
+!*.cs
+!*.py
+
+# 保留项目配置文件
+!*.sln
+!*.csproj
+!*.props
+!*.targets
+
+# 保留文档和说明
+!README.md
+!LICENSE
+!.gitignore
+
+# 保留关键配置（如 launchSettings.json）
+!**/Properties/launchSettings.json
+
+# 保留必要的 JSON/YAML 配置（按需开启）
+# !*.json
+# !*.yaml
+# !*.yml
+
+# =============== 排除高风险目录（即使有源码也不传）===============
+.vs/
+bin/
+obj/
+logs/
+data/
+__pycache__/
+*.log
+*.user
+*.suo
+*.vsidx
+*.csv
+*.txt
+Thumbs.db
+.DS_Store
+.env
