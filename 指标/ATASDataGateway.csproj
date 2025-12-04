@@ -22,6 +22,9 @@
 		<Reference Include="ATAS.Types">
 			<HintPath>..\..\Program Files (x86)\ATAS Platform\ATAS.Types.dll</HintPath>
 		</Reference>
+		<Reference Include="OFT.Rendering">
+		  <HintPath>..\..\Program Files (x86)\ATAS Platform\OFT.Rendering.dll</HintPath>
+		</Reference>
 		<Reference Include="Utils.Common">
 			<HintPath>..\..\Program Files (x86)\ATAS Platform\Utils.Common.dll</HintPath>
 		</Reference>

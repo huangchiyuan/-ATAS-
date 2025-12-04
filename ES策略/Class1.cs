@@ -13,15 +13,12 @@ using ATAS.Strategies.Chart;
 using ATAS.Indicators;
 using ATAS.DataFeedsCore;
 
-// 【核心修复1】引用正确的日志命名空间 (解决 CS0234 和 CS0176)
 using Utils.Common.Logging;
-
-// 【核心修复2】指定别名防止 TradeDirection 类型冲突 (解决 CS0104 和 CS0019)
 using IndTradeDirection = ATAS.Indicators.TradeDirection;
 
 namespace ATAS.Strategies.Technical
 {
-    [DisplayName("NFQE Commander V3.5 (Final Stable)")]
+    [DisplayName("NFQE Commander V3.8 (Final Clean)")]
     public class NFQE_AutoStrategy : ChartStrategy
     {
         #region Parameters
@@ -50,7 +47,6 @@ namespace ATAS.Strategies.Technical
         private IPEndPoint _endPointOut;
         private bool _isRunning = true;
 
-        // 指令队列与订单管理
         private readonly ConcurrentQueue<string> _commandQueue = new ConcurrentQueue<string>();
         private readonly List<Order> _activeOrders = new List<Order>();
         private readonly object _stateLock = new object();
@@ -64,23 +60,23 @@ namespace ATAS.Strategies.Technical
                 _udpSender = new UdpClient();
                 _endPointOut = new IPEndPoint(IPAddress.Parse("127.0.0.1"), PortOut);
 
-                // --- 接收端防丢包配置 ---
+                // --- 指令接收端 (Port 6666) 初始化 ---
                 _udpReceiver = new UdpClient();
                 _udpReceiver.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-
-                // 【关键优化】设置 10MB 接收缓冲区，防止本机高频丢包
                 _udpReceiver.Client.ReceiveBufferSize = 10 * 1024 * 1024;
                 _udpReceiver.Client.Bind(new IPEndPoint(IPAddress.Any, PortIn));
 
-                // 启动后台线程
+                // 确认绑定成功
+                RaiseShowNotification($"Command port bound successfully to {PortIn}.", "NFQE INFO", LoggingLevel.Info);
+
                 Task.Run(() => ListenForCommands());
                 Task.Run(() => ProcessCommandLoop());
                 Task.Run(() => HeartbeatLoop());
             }
             catch (Exception ex)
             {
-                // 【核心修复3】补全参数：Message, Title, Level (解决 CS1503)
-                RaiseShowNotification($"Init Error: {ex.Message}", "NFQE Error", LoggingLevel.Error);
+                // 捕获绑定失败等致命错误
+                RaiseShowNotification($"Init ERROR: Failed to bind command port {PortIn}: {ex.Message}", "NFQE FATAL", LoggingLevel.Error);
             }
         }
 
@@ -89,6 +85,8 @@ namespace ATAS.Strategies.Technical
         {
             try
             {
+                RaiseShowNotification($"Command listener thread running.", "NFQE INFO", LoggingLevel.Info);
+
                 while (_isRunning && _udpReceiver != null)
                 {
                     var result = await _udpReceiver.ReceiveAsync();
@@ -96,7 +94,10 @@ namespace ATAS.Strategies.Technical
                     if (!string.IsNullOrEmpty(cmd)) _commandQueue.Enqueue(cmd);
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                RaiseShowNotification($"Listener Thread FATAL ERROR: {ex.Message}", "NFQE FATAL", LoggingLevel.Error);
+            }
         }
 
         // ================= 指令处理 (消费者) =================
@@ -125,7 +126,6 @@ namespace ATAS.Strategies.Technical
                 string action = parts[0].ToUpper();
                 decimal projectedPos = CalculateProjectedPosition();
 
-                // 2. 风控拦截
                 if (Math.Abs(projectedPos) >= MaxPosition)
                 {
                     bool isBuy = action.Contains("BUY") || action == "JOIN_BID";
@@ -133,27 +133,33 @@ namespace ATAS.Strategies.Technical
                     if ((isBuy && projectedPos > 0) || (isSell && projectedPos < 0)) return;
                 }
 
-                // 3. 执行指令
                 switch (action)
                 {
                     case "BUY_MARKET":
                         PlaceOrder(OrderDirections.Buy, OrderTypes.Market);
+                        RaiseShowNotification("Executed: BUY_MARKET", "NFQE CMD", LoggingLevel.Warning);
                         break;
-
                     case "SELL_MARKET":
                         PlaceOrder(OrderDirections.Sell, OrderTypes.Market);
+                        RaiseShowNotification("Executed: SELL_MARKET", "NFQE CMD", LoggingLevel.Warning);
                         break;
-
+                    case "CANCEL_ALL":
+                        CancelAllOrders();
+                        RaiseShowNotification("Executed: CANCEL_ALL", "NFQE CMD", LoggingLevel.Warning);
+                        break;
+                    case "CLOSE_ALL":
+                        CancelAllOrders();
+                        ClosePosition();
+                        RaiseShowNotification("Executed: CLOSE_ALL", "NFQE CMD", LoggingLevel.Warning);
+                        break;
                     case "BUY_LIMIT":
                         if (parts.Length > 1 && decimal.TryParse(parts[1], out decimal blPrice))
                             PlaceOrder(OrderDirections.Buy, OrderTypes.Limit, blPrice);
                         break;
-
                     case "SELL_LIMIT":
                         if (parts.Length > 1 && decimal.TryParse(parts[1], out decimal slPrice))
                             PlaceOrder(OrderDirections.Sell, OrderTypes.Limit, slPrice);
                         break;
-
                     case "MODIFY":
                         if (parts.Length > 2 &&
                             decimal.TryParse(parts[1], out decimal oldPrice) &&
@@ -162,22 +168,16 @@ namespace ATAS.Strategies.Technical
                             ModifyOrderByPrice(oldPrice, newPrice);
                         }
                         break;
-
                     case "JOIN_BID":
                         var bestBid = GetBestPrice(IndTradeDirection.Sell);
                         if (bestBid > 0) PlaceOrder(OrderDirections.Buy, OrderTypes.Limit, bestBid);
+                        RaiseShowNotification($"Executed: JOIN_BID @ {bestBid}", "NFQE CMD", LoggingLevel.Warning);
                         break;
-
                     case "JOIN_ASK":
                         var bestAsk = GetBestPrice(IndTradeDirection.Buy);
                         if (bestAsk > 0) PlaceOrder(OrderDirections.Sell, OrderTypes.Limit, bestAsk);
+                        RaiseShowNotification($"Executed: JOIN_ASK @ {bestAsk}", "NFQE CMD", LoggingLevel.Warning);
                         break;
-
-                    case "CANCEL_ALL":
-                        CancelAllOrders();
-                        break;
-
-                    case "CLOSE_ALL":
                     case "SCRATCH":
                         CancelAllOrders();
                         ClosePosition();
@@ -190,17 +190,32 @@ namespace ATAS.Strategies.Technical
             }
         }
 
-        // ================= 订单管理增强 =================
+        // --- 订单管理增强与回调 ---
+        private decimal CalculateProjectedPosition()
+        {
+            lock (_stateLock)
+            {
+                decimal projected = CurrentPosition;
+                foreach (var order in _activeOrders)
+                {
+                    if (order.State == OrderStates.Active)
+                    {
+                        decimal pendingVol = order.QuantityToFill;
+                        if (order.Direction == OrderDirections.Buy) projected += pendingVol;
+                        else projected -= pendingVol;
+                    }
+                }
+                return projected;
+            }
+        }
 
         private void ModifyOrderByPrice(decimal oldPrice, decimal newPrice)
         {
             lock (_stateLock)
             {
-                // 使用 OrderStates.Active 替代旧版的 Pending/Working (解决 CS0117)
                 var targetOrder = _activeOrders.FirstOrDefault(o =>
                     o.State == OrderStates.Active &&
                     Math.Abs(o.Price - oldPrice) < Security.TickSize / 2);
-
                 if (targetOrder != null)
                 {
                     var newOrder = new Order
@@ -218,28 +233,6 @@ namespace ATAS.Strategies.Technical
             }
         }
 
-        private decimal CalculateProjectedPosition()
-        {
-            lock (_stateLock)
-            {
-                decimal projected = CurrentPosition;
-
-                foreach (var order in _activeOrders)
-                {
-                    if (order.State == OrderStates.Active)
-                    {
-                        decimal pendingVol = order.QuantityToFill;
-
-                        if (order.Direction == OrderDirections.Buy)
-                            projected += pendingVol;
-                        else
-                            projected -= pendingVol;
-                    }
-                }
-                return projected;
-            }
-        }
-
         private void PlaceOrder(OrderDirections direction, OrderTypes type, decimal price = 0)
         {
             var order = new Order
@@ -251,7 +244,6 @@ namespace ATAS.Strategies.Technical
                 QuantityToFill = TradeVolume,
                 Price = (type == OrderTypes.Limit) ? price : 0
             };
-
             lock (_stateLock) { _activeOrders.Add(order); }
             OpenOrder(order);
         }
@@ -260,7 +252,6 @@ namespace ATAS.Strategies.Technical
         {
             lock (_stateLock)
             {
-                // 只要不是 Active，就视为已终结
                 if (order.State != OrderStates.Active)
                 {
                     _activeOrders.RemoveAll(x => x == order);
@@ -272,8 +263,13 @@ namespace ATAS.Strategies.Technical
             }
         }
 
+        // --- 核心回调: 订单注册失败时记录原因 (唯一的定义) ---
         protected override void OnOrderRegisterFailed(Order order, string message)
         {
+            // [CRITICAL LOG] 记录订单注册失败的原因
+            RaiseShowNotification($"ORDER FAILED: Type={order.Type}, Volume={order.QuantityToFill}, Reason={message}", "NFQE ORDER FAILURE", LoggingLevel.Error);
+
+            // 原始逻辑: 移除失败的订单
             lock (_stateLock) { _activeOrders.Remove(order); }
         }
 
@@ -305,20 +301,17 @@ namespace ATAS.Strategies.Technical
             }
         }
 
-        // 使用别名 IndTradeDirection
         private decimal GetBestPrice(IndTradeDirection dir)
         {
             if (MarketDepthInfo == null) return 0;
             var snapshot = MarketDepthInfo.GetMarketDepthSnapshot();
             if (snapshot == null) return 0;
-
-            if (dir == IndTradeDirection.Sell) // Bid
-                return snapshot.Where(x => x.Direction == IndTradeDirection.Sell).OrderByDescending(x => x.Price).FirstOrDefault()?.Price ?? 0;
-            else // Ask
-                return snapshot.Where(x => x.Direction == IndTradeDirection.Buy).OrderBy(x => x.Price).FirstOrDefault()?.Price ?? 0;
+            if (dir == IndTradeDirection.Sell) return snapshot.Where(x => x.Direction == IndTradeDirection.Sell).OrderByDescending(x => x.Price).FirstOrDefault()?.Price ?? 0;
+            else return snapshot.Where(x => x.Direction == IndTradeDirection.Buy).OrderBy(x => x.Price).FirstOrDefault()?.Price ?? 0;
         }
 
         // ================= 数据发送逻辑 =================
+
         protected override void OnStopping()
         {
             if (CloseOnStop) { CancelAllOrders(); ClosePosition(); }
@@ -334,6 +327,15 @@ namespace ATAS.Strategies.Technical
                 {
                     if (InstrumentInfo != null)
                         SendRaw($"H,{InstrumentInfo.Instrument},{DateTime.Now.Ticks}");
+
+                    var activeLimitOrder = Orders.FirstOrDefault(o =>
+                        o.State == OrderStates.Active &&
+                        o.Type != OrderTypes.Market &&
+                        o.Security == Security);
+
+                    decimal monitoredPrice = (activeLimitOrder != null) ? activeLimitOrder.Price : 0m;
+                    SendRaw($"M,{InstrumentInfo.Instrument},{monitoredPrice}");
+
                 }
                 catch { }
                 await Task.Delay(1000);
@@ -355,15 +357,12 @@ namespace ATAS.Strategies.Technical
                 var snapshot = MarketDepthInfo.GetMarketDepthSnapshot();
                 if (snapshot == null) return;
                 var allData = snapshot.ToList();
-
                 var bids = allData.Where(x => x.Direction == IndTradeDirection.Sell).OrderByDescending(x => x.Price).Take(5).ToList();
                 var asks = allData.Where(x => x.Direction == IndTradeDirection.Buy).OrderBy(x => x.Price).Take(5).ToList();
-
                 string bidsStr = "";
                 for (int i = 0; i < 5; i++) bidsStr += (i < bids.Count) ? $"{bids[i].Price}@{bids[i].Volume}|" : "0@0|";
                 string asksStr = "";
                 for (int i = 0; i < 5; i++) asksStr += (i < asks.Count) ? $"{asks[i].Price}@{asks[i].Volume}|" : "0@0|";
-
                 SendRaw($"D,{InstrumentInfo.Instrument},{bidsStr},{asksStr}");
             }
             catch { }

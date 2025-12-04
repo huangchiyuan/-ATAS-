@@ -6,88 +6,150 @@ using System.Net.Sockets;
 using System.Text;
 using System.Linq;
 using System.Collections.Generic;
-using System.Timers; // [新增] 用于心跳
+using System.Timers;
 using ATAS.Indicators;
 using ATAS.Indicators.Technical;
 
-// 解决 Timer 冲突
+// 解决 Timer 命名冲突
 using Timer = System.Timers.Timer;
+using Utils.Common.Logging;
 
 namespace ATAS.Indicators.Technical
 {
-    [DisplayName("NFQE Bridge V18.0 (Heartbeat + Sync)")]
+    [DisplayName("NFQE DataPump V4.0 (Live Trading Optimized)")]
+    [Description("专为实盘优化的数据桥：Tick即时发送，DOM智能缓冲，带高精度时间戳。")]
     [Category("Norden Flow")]
     public class NFQE_Bridge_UDP : Indicator
     {
-        [Display(Name = "UDP Port", GroupName = "Connection")]
-        public int Port { get; set; } = 5555;
+        #region 参数设置
+        [Display(Name = "Python IP", GroupName = "Connection", Order = 10)]
+        public string PythonIP { get; set; } = "127.0.0.1";
+
+        [Display(Name = "Python Port", GroupName = "Connection", Order = 20)]
+        public int PythonPort { get; set; } = 5555;
+
+        [Display(Name = "DOM Depth", GroupName = "Data", Order = 30)]
+        public int DepthLevels { get; set; } = 15;
+
+        // 缓冲区阈值 (仅用于 DOM 数据)
+        private const int BATCH_THRESHOLD = 8192;
+        #endregion
 
         private UdpClient _udpClient;
         private IPEndPoint _endPoint;
-        private Timer _heartbeatTimer; // [新增] 心跳定时器
+        private Timer _flushTimer;
+
         private string _lastDepthHash = "";
+
+        // 批量发送缓冲区 (主要用于 DOM 和 心跳)
+        private readonly StringBuilder _batchBuffer = new StringBuilder(BATCH_THRESHOLD * 2);
+        private readonly object _lockObj = new object();
 
         protected override void OnInitialize()
         {
             try
             {
-                // 初始化 UDP
-                _udpClient = new UdpClient();
-                _endPoint = new IPEndPoint(IPAddress.Parse("127.0.0.1"), Port);
+                InitializeNetwork();
 
-                // [新增] 启动心跳定时器 (1秒一次)
-                // 确保 Python 端的 check_connections 不会因为 NQ/YM 暂时没成交而误报断开
-                _heartbeatTimer = new Timer(1000);
-                _heartbeatTimer.Elapsed += OnHeartbeat;
-                _heartbeatTimer.AutoReset = true;
-                _heartbeatTimer.Enabled = true;
+                // [实盘优化] 将刷新间隔从 500ms 降低到 50ms
+                // 这意味着 DOM 数据最慢也会在 50ms 内发出，满足人眼和策略需求
+                _flushTimer = new Timer(50);
+                _flushTimer.Elapsed += OnTimerTick;
+                _flushTimer.AutoReset = true;
+                _flushTimer.Enabled = true;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                this.LogInfo($"NFQE Init Error: {ex.Message}");
+            }
         }
 
-        private void EnsureConnection()
+        private void InitializeNetwork()
         {
-            if (_udpClient == null)
+            if (_udpClient != null) _udpClient.Close();
+            _udpClient = new UdpClient();
+
+            // 增大 OS 发送缓冲区，防止在 500x 回放或高频快市时丢包
+            _udpClient.Client.SendBufferSize = 1024 * 1024; // 1MB Buffer
+
+            _endPoint = new IPEndPoint(IPAddress.Parse(PythonIP), PythonPort);
+        }
+
+        private void OnTimerTick(object sender, ElapsedEventArgs e)
+        {
+            // 1. 发送心跳 (H,Symbol,LocalTime) - 用于检测连接状态
+            if (this.InstrumentInfo != null)
+            {
+                AddToBatch($"H,{this.InstrumentInfo.Instrument},{DateTime.UtcNow.Ticks}");
+            }
+
+            // 2. 强制刷新缓冲区 (把积压的 DOM 发出去)
+            FlushBatch();
+        }
+
+        // 将数据添加到缓冲区 (用于高吞吐量的 DOM)
+        private void AddToBatch(string line)
+        {
+            lock (_lockObj)
+            {
+                _batchBuffer.Append(line);
+                _batchBuffer.Append('\n');
+
+                if (_batchBuffer.Length >= BATCH_THRESHOLD)
+                {
+                    FlushBatch();
+                }
+            }
+        }
+
+        // 执行网络发送
+        private void FlushBatch()
+        {
+            lock (_lockObj)
+            {
+                if (_batchBuffer.Length == 0) return;
+
+                if (_udpClient != null)
+                {
+                    try
+                    {
+                        string payload = _batchBuffer.ToString();
+                        byte[] bytes = Encoding.UTF8.GetBytes(payload);
+                        _udpClient.Send(bytes, bytes.Length, _endPoint);
+                    }
+                    catch { /* 忽略网络错误，保持运行 */ }
+                }
+
+                _batchBuffer.Clear();
+            }
+        }
+
+        // [实盘核心] 直接发送，绕过缓冲区
+        private void SendRaw(string message)
+        {
+            if (_udpClient != null)
             {
                 try
                 {
-                    _udpClient = new UdpClient();
-                    _endPoint = new IPEndPoint(IPAddress.Parse("127.0.0.1"), Port);
+                    byte[] bytes = Encoding.UTF8.GetBytes(message);
+                    _udpClient.Send(bytes, bytes.Length, _endPoint);
                 }
                 catch { }
             }
-        }
-
-        // [新增] 心跳发送逻辑
-        private void OnHeartbeat(object sender, ElapsedEventArgs e)
-        {
-            try
-            {
-                if (this.InstrumentInfo != null)
-                {
-                    EnsureConnection();
-                    // 格式: H,Symbol,Timestamp
-                    SendRaw($"H,{this.InstrumentInfo.Instrument},{DateTime.Now.Ticks}");
-                }
-            }
-            catch { }
         }
 
         protected override void OnNewTrade(MarketDataArg arg)
         {
             try
             {
-                if (this.Container == null || this.InstrumentInfo == null) return;
-                EnsureConnection();
+                string side = arg.Direction == TradeDirection.Buy ? "BUY" : (arg.Direction == TradeDirection.Sell ? "SELL" : "NONE");
 
-                string side = "NONE";
-                // [优化] 使用 ToString() 比较，与策略端保持一致，避免 CS0019 错误
-                string dirStr = arg.Direction.ToString();
-                if (dirStr == "Buy") side = "BUY";
-                else if (dirStr == "Sell") side = "SELL";
+                // 格式: T,Symbol,Price,Volume,Side,ExchangeTimeTicks
+                string msg = $"T,{this.InstrumentInfo.Instrument},{arg.Price},{arg.Volume},{side},{arg.Time.Ticks}";
 
-                // 发送成交: T,Symbol,Price,Volume,Side
-                SendRaw($"T,{this.InstrumentInfo.Instrument},{arg.Price},{arg.Volume},{side}");
+                // [实盘优化] Tick 数据极其重要且体积小，直接立即发送！
+                // 这样可以实现 <1ms 的传输延迟
+                SendRaw(msg + "\n");
             }
             catch { }
         }
@@ -96,51 +158,75 @@ namespace ATAS.Indicators.Technical
         {
             try
             {
-                if (this.Container == null || this.InstrumentInfo == null) return;
-
                 var provider = this.MarketDepthInfo;
                 if (provider == null) return;
 
+                // 获取深度快照
                 var snapshot = provider.GetMarketDepthSnapshot();
                 if (snapshot == null) return;
 
-                var allData = snapshot.ToList();
-
-                // [逻辑保持] Buy=Asks(升序), Sell=Bids(降序)
-                var bids = allData
-                    .Where(x => x.Direction.ToString() == "Sell")
-                    .OrderByDescending(x => x.Price)
-                    .Take(5)
-                    .ToList();
-
-                var asks = allData
-                    .Where(x => x.Direction.ToString() == "Buy")
-                    .OrderBy(x => x.Price)
-                    .Take(5)
-                    .ToList();
-
-                // 拼接 Price@Volume
-                string bidsStr = "";
-                for (int i = 0; i < 5; i++)
+                // 调试：检查 ATAS 实际返回的 DOM 档数和价格区间，确认是否在这里被截断
+                try
                 {
-                    if (i < bids.Count) bidsStr += $"{bids[i].Price}@{bids[i].Volume}|";
-                    else bidsStr += "0@0|";
-                }
+                    var bidLevelsAll = snapshot.Where(x => x.Direction == TradeDirection.Buy).ToList();
+                    var askLevelsAll = snapshot.Where(x => x.Direction == TradeDirection.Sell).ToList();
+                    var bidCount = bidLevelsAll.Count;
+                    var askCount = askLevelsAll.Count;
 
-                string asksStr = "";
-                for (int i = 0; i < 5; i++)
+                    var maxBid = bidCount > 0 ? bidLevelsAll.Max(x => x.Price) : 0m;
+                    var minBid = bidCount > 0 ? bidLevelsAll.Min(x => x.Price) : 0m;
+                    var minAsk = askCount > 0 ? askLevelsAll.Min(x => x.Price) : 0m;
+                    var maxAsk = askCount > 0 ? askLevelsAll.Max(x => x.Price) : 0m;
+
+                    this.LogInfo($"[DEBUG DOM] {this.InstrumentInfo.Instrument} snapshot BID={bidCount} [{minBid} ~ {maxBid}], ASK={askCount} [{minAsk} ~ {maxAsk}], DepthLevels={DepthLevels}");
+                }
+                catch { }
+
+                // 使用 StringBuilder 拼接 DOM 字符串
+                StringBuilder sbDom = new StringBuilder(512);
+                sbDom.Append("D,");
+                sbDom.Append(this.InstrumentInfo.Instrument);
+                sbDom.Append(",");
+
+                // Bids
+                // 为保证与 ATAS DOM 完全一致，这里不再按 DepthLevels 截断，直接发送 DataFeed 提供的全部可见档位
+                var bids = snapshot
+                    .Where(x => x.Direction == TradeDirection.Buy)
+                    .OrderByDescending(x => x.Price);
+                bool first = true;
+                foreach (var level in bids)
                 {
-                    if (i < asks.Count) asksStr += $"{asks[i].Price}@{asks[i].Volume}|";
-                    else asksStr += "0@0|";
+                    if (!first) sbDom.Append("|");
+                    sbDom.Append(level.Price).Append("@").Append(level.Volume);
+                    first = false;
                 }
+                if (first) sbDom.Append("0@0");
+                sbDom.Append(",");
 
-                // 发送深度: D,Symbol,Bids,Asks
-                string msg = $"D,{this.InstrumentInfo.Instrument},{bidsStr},{asksStr}";
+                // Asks
+                var asks = snapshot
+                    .Where(x => x.Direction == TradeDirection.Sell)
+                    .OrderBy(x => x.Price);
+                first = true;
+                foreach (var level in asks)
+                {
+                    if (!first) sbDom.Append("|");
+                    sbDom.Append(level.Price).Append("@").Append(level.Volume);
+                    first = false;
+                }
+                if (first) sbDom.Append("0@0");
 
+                // 交易所时间戳
+                sbDom.Append(",");
+                sbDom.Append(arg.Time.Ticks);
+
+                string msg = sbDom.ToString();
+
+                // 去重：只有当深度数据真的变化时才发送
                 if (msg != _lastDepthHash)
                 {
-                    EnsureConnection();
-                    SendRaw(msg);
+                    // DOM 数据进缓冲区，由 Timer (50ms) 或 阈值触发发送
+                    AddToBatch(msg);
                     _lastDepthHash = msg;
                 }
             }
@@ -149,22 +235,10 @@ namespace ATAS.Indicators.Technical
 
         protected override void OnCalculate(int bar, decimal value) { }
 
-        private void SendRaw(string message)
-        {
-            if (_udpClient != null && _endPoint != null)
-            {
-                try
-                {
-                    byte[] bytes = Encoding.ASCII.GetBytes(message);
-                    _udpClient.Send(bytes, bytes.Length, _endPoint);
-                }
-                catch { }
-            }
-        }
-
         public override void Dispose()
         {
-            _heartbeatTimer?.Stop(); // 停止心跳
+            FlushBatch();
+            _flushTimer?.Stop();
             _udpClient?.Close();
             base.Dispose();
         }
