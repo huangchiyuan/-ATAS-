@@ -12,7 +12,7 @@ Norden Engine v3.1 - Institutional Maker
     - 回测：从 DuckDB 读取历史数据 → 逐条喂给 NordenMakerV3
 """
 
-from .maker_engine import NordenMakerV3, MakerConfig
+from .maker_engine import NordenMakerV3
 from .types import (
     Side,
     OrderType,
@@ -20,31 +20,52 @@ from .types import (
     TickEvent,
     DomSnapshot,
 )
-from .kalman_model import OnlineKalman, KalmanConfig
-from .ridge_model import OnlineRidge, RidgeConfig
-from .obi_calculator import OBICalculator, OBIConfig, calculate_simple_obi
-from .iceberg_detector import IcebergDetector, IcebergConfig
-from .btc_regime import BTCRegimeMonitor, BTCRegimeConfig
+from .kalman_model import OnlineKalman
+from .ridge_model import OnlineRidge
+from .obi_calculator import OBICalculator, calculate_simple_obi
+from .iceberg_detector import IcebergDetector
+from .btc_regime import BTCRegimeMonitor
+from .backtest_analyzer import BacktestAnalyzer, SignalRecord
+from .backtest_config import BacktestConfig, BacktestResult, PricingModel
+from .ridge_engine import RidgeMakerEngine
+
+# 从配置文件统一导入所有配置类
+from .config import (
+    MakerConfig,
+    KalmanConfig,
+    RidgeConfig,
+    OBIConfig,
+    IcebergConfig,
+    BTCRegimeConfig,
+    PresetConfigs,
+)
 
 __all__ = [
     "NordenMakerV3",
     "MakerConfig",
+    "KalmanConfig",
+    "RidgeConfig",
+    "OBIConfig",
+    "IcebergConfig",
+    "BTCRegimeConfig",
+    "PresetConfigs",
     "Side",
     "OrderType",
     "OrderCommand",
     "TickEvent",
     "DomSnapshot",
     "OnlineKalman",
-    "KalmanConfig",
     "OnlineRidge",
-    "RidgeConfig",
     "OBICalculator",
-    "OBIConfig",
     "calculate_simple_obi",
     "IcebergDetector",
-    "IcebergConfig",
     "BTCRegimeMonitor",
-    "BTCRegimeConfig",
+    "BacktestAnalyzer",
+    "SignalRecord",
+    "BacktestConfig",
+    "BacktestResult",
+    "PricingModel",
+    "RidgeMakerEngine",
 ]
 
 

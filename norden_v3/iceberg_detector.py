@@ -26,23 +26,7 @@ from typing import Dict, Optional, List, Tuple
 import time
 
 from .types import DomSnapshot, TickEvent
-
-
-@dataclass
-class IcebergConfig:
-    """冰山检测配置."""
-
-    # 最小隐藏量阈值（过滤噪音）
-    min_hidden_size: int = 10
-
-    # 冰山衰减时间（秒）：超过此时间认为冰山已失效
-    decay_seconds: float = 60.0
-
-    # 价格容差（用于比较价格是否相同）
-    price_tolerance: float = 1e-5
-
-    # 检查范围（tick）：查询阻力/支撑时检查的价格范围
-    check_range_ticks: int = 4
+from .config import IcebergConfig
 
 
 @dataclass

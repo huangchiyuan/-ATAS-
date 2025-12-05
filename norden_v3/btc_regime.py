@@ -19,27 +19,11 @@ BTC 体制过滤器 (BTC Regime Filter)
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
 from typing import Optional
 import time
 import numpy as np
 
-
-@dataclass
-class BTCRegimeConfig:
-    """BTC 体制监控配置."""
-
-    # 短期窗口：60秒（1分钟）
-    short_window_seconds: int = 60
-
-    # 长期窗口：600秒（10分钟）
-    long_window_seconds: int = 600
-
-    # 报警阈值：当前波动是平时的倍数
-    alert_threshold: float = 3.0
-
-    # 采样频率：每秒采样一次（1Hz）
-    sample_interval_seconds: float = 1.0
+from .config import BTCRegimeConfig
 
 
 class BTCRegimeMonitor:

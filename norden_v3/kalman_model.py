@@ -10,29 +10,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Tuple, Optional
 
 import numpy as np
 
 from .types import TickEvent
-
-
-@dataclass
-class KalmanConfig:
-    """Kalman 参数配置 (针对 ES/NQ/YM 微观结构调优)."""
-
-    # 初始协方差：这里主要用于 Alpha，Beta 的初值方差在 __init__ 中单独缩放
-    init_P: float = 100.0
-
-    # 过程噪声 Q：Beta 极度稳定，只允许缓慢漂移；Alpha 稍微灵活一些
-    # 注意：由于价格量纲很大，这里的数值必须非常小
-    q_beta: float = 1e-12
-    q_alpha: float = 1e-6
-
-    # 观测噪声 R：设为较大值，强迫模型容忍价差的存在
-    # 含义：允许几十点级别的偏差不被立即“修正掉”
-    r_obs: float = 100.0
+from .config import KalmanConfig
 
 
 class OnlineKalman:

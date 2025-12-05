@@ -29,23 +29,7 @@ from typing import List, Tuple, Optional
 import numpy as np
 
 from .types import DomSnapshot
-
-
-@dataclass
-class OBIConfig:
-    """OBI 计算配置."""
-
-    # 计算深度：使用前几档
-    # Level 1-3 最重要（真实挂单），Level 10+ 很多是假单
-    depth: int = 10
-
-    # 权重衰减系数：decay 越大，权重衰减越快
-    # decay = 0.5  →  Level 1=100%, Level 2=60%, Level 3=36%
-    # decay = 1.0  →  Level 1=100%, Level 2=37%, Level 3=14% (更激进)
-    decay: float = 0.5
-
-    # 是否使用自适应深度（根据实际可用档位数自动调整）
-    auto_adjust_depth: bool = True
+from .config import OBIConfig
 
 
 class OBICalculator:

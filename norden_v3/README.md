@@ -23,8 +23,11 @@ Norden Engine v3.1 是一个机构级混合做市策略引擎，专为 CME ES/NQ
 
 ### 目录结构
 
+- `config.py`  
+  **集中配置文件**：所有可配置参数都在这里，包含详细注释和调优建议。
+
 - `__init__.py`  
-  导出核心类 `NordenMakerV3` 及常用类型。
+  导出核心类 `NordenMakerV3` 及常用类型、配置类。
 
 - `types.py`  
   定义统一的数据与指令类型：

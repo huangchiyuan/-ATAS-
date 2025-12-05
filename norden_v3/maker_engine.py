@@ -23,37 +23,17 @@ import time
 import numpy as np
 
 from .types import TickEvent, DomSnapshot, OrderCommand, Side, OrderType
-from .kalman_model import OnlineKalman, KalmanConfig
-from .obi_calculator import OBICalculator, OBIConfig
-from .iceberg_detector import IcebergDetector, IcebergConfig
-from .btc_regime import BTCRegimeMonitor, BTCRegimeConfig
-
-
-@dataclass
-class MakerConfig:
-    """NordenMakerV3 的高层参数."""
-
-    # ---- Spread 相关 ----
-    base_spread_threshold: float = 0.5  # 基础阈值（单位：tick，可按需换算）
-
-    # ---- Regime 过滤 ----
-    max_btc_volatility: float = 1.5
-
-    # ---- OBI 过滤 ----
-    min_obi_for_long: float = 0.1
-    min_obi_for_short: float = 0.1
-    obi_depth: int = 10  # 使用前几档计算
-
-    # ---- 队列过滤（这里暂时用“聚合量”做弱替代） ----
-    max_queue_size: int = 300  # 白皮书中的 300 手
-
-    # ---- 时间相关（单位：秒） ----
-    max_wait_seconds: float = 3.0   # 挂单最长等待时间
-    hard_stop_seconds: float = 10.0  # 持仓最久时间
-
-    # ---- 止盈止损（单位：tick） ----
-    take_profit_ticks: float = 4.0
-    hard_stop_ticks: float = 6.0
+from .kalman_model import OnlineKalman
+from .obi_calculator import OBICalculator
+from .iceberg_detector import IcebergDetector
+from .btc_regime import BTCRegimeMonitor
+from .config import (
+    MakerConfig,
+    KalmanConfig,
+    OBIConfig,
+    IcebergConfig,
+    BTCRegimeConfig,
+)
 
 
 @dataclass

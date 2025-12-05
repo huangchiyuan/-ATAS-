@@ -9,34 +9,12 @@ Online Ridge Regression (在线岭回归) - HFT 定价引擎
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Tuple, Optional
 
 import numpy as np
 
 from .types import TickEvent
-
-
-@dataclass
-class RidgeConfig:
-    """
-    岭回归参数配置
-    """
-
-    # 1. 遗忘因子 (Forgetting Factor): 决定记忆长度
-    # 0.999 ~= 过去 1000 tick (稳健)
-    # 0.99  ~= 过去 100 tick (灵敏)
-    lambda_factor: float = 0.995
-
-    # 2. 岭惩罚系数 (Ridge Penalty / Alpha): 决定模型有多"硬"
-    # 这是产生 Spread 的核心！
-    # 0.0      = 普通 RLS (Spread 容易被吃光)
-    # 1e-4     = 标准惩罚 (推荐)
-    # 1e-3     = 强力惩罚 (Spread 会很大，但可能滞后)
-    ridge_alpha: float = 1e-4
-
-    # 3. 初始不确定性 (Initial Covariance)
-    init_P: float = 100.0
+from .config import RidgeConfig
 
 
 class OnlineRidge:
@@ -137,20 +115,52 @@ class OnlineRidge:
 
         # 分母 g = λ + x^T * P * x
         g = self.cfg.lambda_factor + float(x.dot(Px))
+        
+        # 数值稳定性：防止 g 过小导致 k 过大
+        if g < 1e-10:
+            g = 1e-10
 
         # 增益向量 k = Px / g
         k = Px / g
+        
+        # 数值稳定性：限制增益向量的大小（防止参数爆炸）
+        k_max = 100.0  # 最大增益幅度
+        k_norm = np.linalg.norm(k)
+        if k_norm > k_max:
+            k = k * (k_max / k_norm)
 
         # 更新 P 矩阵:
         # P_new = (P - k * x^T * P) / λ
         self.P = (self.P - np.outer(k, Px)) / self.cfg.lambda_factor
+        
+        # 数值稳定性：防止 P 矩阵对角线元素过大
+        P_max = 1e6  # P 矩阵元素的最大值
+        self.P = np.clip(self.P, -P_max, P_max)
 
         # --- 5. 权重更新 (带岭惩罚 Ridge Penalty) ---
         # 预测误差 (a priori error)
         error = y_es - y_pred_delta
+        
+        # 数值稳定性：限制误差大小（防止单次更新过大）
+        error_max = 100.0  # 最大误差（点数）
+        if abs(error) > error_max:
+            error = error_max if error > 0 else -error_max
 
-        # A. 正常学习步骤
-        self.theta += k * error
+        # A. 正常学习步骤（带溢出保护）
+        try:
+            update = k * error
+            # 检查更新是否会导致溢出
+            if np.any(np.isinf(update)) or np.any(np.isnan(update)):
+                # 如果溢出，跳过本次更新
+                pass
+            else:
+                self.theta += update
+                # 限制参数范围（防止累积溢出）
+                theta_max = 100.0  # 参数的最大绝对值
+                self.theta = np.clip(self.theta, -theta_max, theta_max)
+        except (OverflowError, FloatingPointError):
+            # 捕获溢出错误，跳过本次更新
+            pass
 
         # B. 岭回归收缩步骤 (Weight Decay):
         if self.cfg.ridge_alpha > 0.0:
